@@ -19,6 +19,8 @@ module Devise
 
   module Encryptable
     module Encryptors
+      InvalidHash = Class.new(StandardError)
+
       autoload :AuthlogicSha512, 'devise/encryptable/encryptors/authlogic_sha512'
       autoload :Base, 'devise/encryptable/encryptors/base'
       autoload :ClearanceSha1, 'devise/encryptable/encryptors/clearance_sha1'
