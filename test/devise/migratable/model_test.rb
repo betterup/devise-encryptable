@@ -1,6 +1,12 @@
 require 'test_helper'
 require 'active_model'
 
+class Features
+  def self.active?(name, value)
+    true
+  end
+end
+
 class MigratableTest < ActiveSupport::TestCase
   include Support::Assertions
   include Support::Factories
@@ -90,6 +96,16 @@ class MigratableTest < ActiveSupport::TestCase
     end
   end
 
+  def configed_user_model_with_feature_name
+    Class.new(unconfig_user_model) do
+      devise :database_authenticatable,
+             :migratable,
+             encryptor: :pbkdf2_sha512,
+             feature_class: "::Features",
+             feature_name: :does_not_matter
+    end
+  end
+
   def make_user_model_raise_error_when_updating_attribute
     user_class = configed_user_model
     Class.new(user_class) do
@@ -116,6 +132,14 @@ class MigratableTest < ActiveSupport::TestCase
 
   test 'should validate against the new password column' do
     user = configed_user_model_with_feature(enabled: true).new
+    user.password = 'password'
+    # mess around with old one so we ensure it's checking against the new one
+    user.encrypted_password = 'thisonly changes old one'
+    assert user.valid_password?('password')
+  end
+
+  test 'should validate against the new password column using feature class name' do
+    user = configed_user_model_with_feature_name.new
     user.password = 'password'
     # mess around with old one so we ensure it's checking against the new one
     user.encrypted_password = 'thisonly changes old one'

@@ -116,7 +116,7 @@ module Devise
       end
 
       def feature_class
-        self.class.feature_class
+        self.class.feature_class_module
       end
 
       def feature_name
@@ -126,6 +126,11 @@ module Devise
       # class method get injected into Devise module
       module ClassMethods
         Devise::Models.config(self, :encryptor, :feature_class, :feature_name)
+
+        def feature_class_module
+          @feature_class_module ||=
+            feature_class.is_a?(String) ? const_get(feature_class) : feature_class
+        end
 
         # Returns the class for the configured encryptor.
         def encryptor_class
