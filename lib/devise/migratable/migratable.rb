@@ -3,11 +3,21 @@ module Devise
   mattr_accessor :encryptor
   @@encryptor = nil
 
-  mattr_accessor :feature_class
-  @@feature_class = nil
+  # block to be evaluated to determine wether to validate using encryptor
+  mattr_accessor :enable_validation
+  @@enable_validation = nil
 
-  mattr_accessor :feature_name
-  @@feature_name = nil
+  # Sets enable_validation block
+  #
+  #  Devise.setup do |config|
+  #
+  #    config.validate_using_encryptor do |user|
+  #      Features.active?(:enable_pbkdf2_validation, user)
+  #    end
+  #  end
+  def self.validate_using_encryptor(&block)
+    @@enable_validation = block
+  end
 
   module Migratable
     module Encryptors
