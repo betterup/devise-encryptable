@@ -7,6 +7,12 @@ class Features
   end
 end
 
+module RaiseWhenCallingActive
+  def active?(_name, _value)
+    raise "redefine"
+  end
+end
+
 class MigratableTest < ActiveSupport::TestCase
   include Support::Assertions
   include Support::Factories
@@ -59,6 +65,10 @@ class MigratableTest < ActiveSupport::TestCase
         Devise.friendly_token[0, 20]
       end
     end
+  end
+
+  def redefine_feature_class
+    Features.singleton_class.prepend(RaiseWhenCallingActive)
   end
 
   def user_model_with_additional_except_list
@@ -139,11 +149,17 @@ class MigratableTest < ActiveSupport::TestCase
   end
 
   test 'should validate against the new password column using feature class name' do
-    user = configed_user_model_with_feature_name.new
+    user_class = configed_user_model_with_feature_name
+    user = user_class.new
     user.password = 'password'
     # mess around with old one so we ensure it's checking against the new one
     user.encrypted_password = 'thisonly changes old one'
     assert user.valid_password?('password')
+    # redefine feature class to let it raise during active? call
+    redefine_feature_class
+    # reload
+    user_class.reload_feature_class!
+    assert_raise { user.valid_password?('password') }
   end
 
   test 'should save new encrypted pass if not exists at the beginning' do
