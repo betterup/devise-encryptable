@@ -128,8 +128,11 @@ module Devise
         Devise::Models.config(self, :encryptor, :feature_class, :feature_name)
 
         def feature_class_module
-          @feature_class_module ||=
-            feature_class.is_a?(String) ? const_get(feature_class) : feature_class
+          @feature_class_module ||= reload_feature_class!
+        end
+
+        def reload_feature_class!
+          @feature_class_module = feature_class.is_a?(String) ? const_get(feature_class) : feature_class
         end
 
         # Returns the class for the configured encryptor.
