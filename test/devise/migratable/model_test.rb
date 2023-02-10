@@ -67,10 +67,6 @@ class MigratableTest < ActiveSupport::TestCase
     end
   end
 
-  def redefine_feature_class
-    Features.singleton_class.prepend(RaiseWhenCallingActive)
-  end
-
   def user_model_with_additional_except_list
     Class.new(configed_user_model) do
       attr_accessor :phone
@@ -87,32 +83,12 @@ class MigratableTest < ActiveSupport::TestCase
     end
   end
 
-  def feature_class(active: true)
-    Class.new do
-      define_singleton_method :active? do |_name, _model|
-        active
-      end
-    end
-  end
-
   def configed_user_model_with_feature(enabled: true)
-    enabled_feature_class = feature_class(active: enabled)
     Class.new(unconfig_user_model) do
       devise :database_authenticatable,
              :migratable,
              encryptor: :pbkdf2_sha512,
-             feature_class: enabled_feature_class,
-             feature_name: :does_not_matter
-    end
-  end
-
-  def configed_user_model_with_feature_name
-    Class.new(unconfig_user_model) do
-      devise :database_authenticatable,
-             :migratable,
-             encryptor: :pbkdf2_sha512,
-             feature_class: "::Features",
-             feature_name: :does_not_matter
+             enable_validation: proc { enabled }
     end
   end
 
@@ -146,20 +122,6 @@ class MigratableTest < ActiveSupport::TestCase
     # mess around with old one so we ensure it's checking against the new one
     user.encrypted_password = 'thisonly changes old one'
     assert user.valid_password?('password')
-  end
-
-  test 'should validate against the new password column using feature class name' do
-    user_class = configed_user_model_with_feature_name
-    user = user_class.new
-    user.password = 'password'
-    # mess around with old one so we ensure it's checking against the new one
-    user.encrypted_password = 'thisonly changes old one'
-    assert user.valid_password?('password')
-    # redefine feature class to let it raise during active? call
-    redefine_feature_class
-    # reload
-    user_class.reload_feature_class!
-    assert_raise { user.valid_password?('password') }
   end
 
   test 'should save new encrypted pass if not exists at the beginning' do
