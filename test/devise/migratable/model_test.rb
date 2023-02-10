@@ -71,22 +71,12 @@ class MigratableTest < ActiveSupport::TestCase
     end
   end
 
-  def feature_class(active: true)
-    Class.new do
-      define_singleton_method :active? do |_name, _model|
-        active
-      end
-    end
-  end
-
   def configed_user_model_with_feature(enabled: true)
-    enabled_feature_class = feature_class(active: enabled)
     Class.new(unconfig_user_model) do
       devise :database_authenticatable,
              :migratable,
              encryptor: :pbkdf2_sha512,
-             feature_class: enabled_feature_class,
-             feature_name: :does_not_matter
+             enable_validation: proc { |_user| enabled }
     end
   end
 

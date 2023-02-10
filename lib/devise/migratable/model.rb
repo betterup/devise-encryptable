@@ -61,7 +61,7 @@ module Devise
         return false if encrypted_password.blank?
 
         # only if feature enabled? then we do the work here
-        if feature_enabled? && encrypted_password_migrate_to.present?
+        if encryptor_validation_enabled? && encrypted_password_migrate_to.present?
           valid_password_using_encryptor?(password)
         else
           result = super
@@ -92,8 +92,8 @@ module Devise
                                self.class.pepper)
       end
 
-      def feature_enabled?
-        feature_class&.try(:active?, feature_name, self)
+      def encryptor_validation_enabled?
+        self.class.enable_validation&.call(self)
       end
 
       def valid_password_using_encryptor?(password)
@@ -115,17 +115,9 @@ module Devise
         self.class.encryptor_class
       end
 
-      def feature_class
-        self.class.feature_class
-      end
-
-      def feature_name
-        self.class.feature_name
-      end
-
       # class method get injected into Devise module
       module ClassMethods
-        Devise::Models.config(self, :encryptor, :feature_class, :feature_name)
+        Devise::Models.config(self, :encryptor, :enable_validation)
 
         # Returns the class for the configured encryptor.
         def encryptor_class
