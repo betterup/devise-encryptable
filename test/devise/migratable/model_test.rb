@@ -12,7 +12,7 @@ class MigratableTest < ActiveSupport::TestCase
       extend ActiveModel::Callbacks
       include ActiveModel::Validations::Callbacks
       extend Devise::Models
-      # in order to call update_attribute
+      # in order to call update_column
 
       define_model_callbacks :update, only: :after
 
@@ -26,13 +26,17 @@ class MigratableTest < ActiveSupport::TestCase
       end
 
       # skip active record layer
-      def update_attribute(_name, value)
+      def update_column(_name, value)
         self.encrypted_password_migrate_to = value
       end
 
       # prevent moving salt everytime
       def self.password_salt
         'here we go'
+      end
+
+      def new_record?
+        false
       end
 
       def attributes
@@ -71,6 +75,14 @@ class MigratableTest < ActiveSupport::TestCase
     end
   end
 
+  def user_model_always_new_record
+    Class.new(configed_user_model) do
+      def new_record?
+        true
+      end
+    end
+  end
+
   def configed_user_model_with_feature(enabled: true)
     Class.new(unconfig_user_model) do
       devise :database_authenticatable,
@@ -83,7 +95,7 @@ class MigratableTest < ActiveSupport::TestCase
   def make_user_model_raise_error_when_updating_attribute
     user_class = configed_user_model
     Class.new(user_class) do
-      def update_attribute(_name, _value)
+      def update_column(_name, _value)
         raise ActiveRecord::ActiveRecordError, 'Can not update attribute somehow'
       end
     end
@@ -167,11 +179,21 @@ class MigratableTest < ActiveSupport::TestCase
     refute inspect_str.include?('phone')
   end
 
-  test 'migratable should not raise error when update_attribute failed' do
+  test 'migratable should not raise error when update_column failed' do
     user = make_user_model_raise_error_when_updating_attribute.new
     user.password = 'password'
-    # nil the encrypted_password_migrate_to column so this will enforce we are calling the update_attribute
+    # nil the encrypted_password_migrate_to column so this will enforce we are calling the update_column
     user.encrypted_password_migrate_to = nil
     assert user.valid_password?('password')
+  end
+
+  test 'migratable should not update_column when new record' do
+    user = user_model_always_new_record.new
+    user.password = 'password'
+    # let's nil it
+    user.encrypted_password_migrate_to = nil
+    user.valid_password?('password')
+    # do not issue update_column call for new_record
+    assert user.encrypted_password_migrate_to.nil?
   end
 end
