@@ -80,9 +80,11 @@ module Devise
       protected
 
       def update_encrypted_password_migrate_to(password)
-        update_attribute(:encrypted_password_migrate_to, generate_digest_for_password(password))
+        return if new_record?
+
+        update_column(:encrypted_password_migrate_to, generate_digest_for_password(password))
       rescue StandardError => e # capture StandardError instead of ActiveRecordError to play safe
-        log_error('Failed to update_attribute encrypted_password_migrate_to', e)
+        log_error('Failed to update_column encrypted_password_migrate_to', e)
       end
 
       def generate_digest_for_password(password)
