@@ -19,6 +19,13 @@ module Devise
   
             format_hash(STRATEGY, stretches, salt, checksum)
           end
+
+          def self.valid_hash?(pass)
+            split_digest(pass)
+            true
+          rescue StandardError
+            false
+          end
   
           private_class_method def self.sha512_checksum(password, stretches, salt, pepper)
             hash = OpenSSL::Digest.new('SHA512')

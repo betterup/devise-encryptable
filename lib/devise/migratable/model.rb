@@ -1,4 +1,5 @@
 require 'devise/strategies/database_authenticatable'
+require 'bcrypt'
 
 module Devise
   module Models
@@ -50,9 +51,9 @@ module Devise
       # Generates new password for the new encryptor
       # generate password of the old one using super
       def password=(new_password)
-        # everytime we store the new one with the given encryptor
-        self.encrypted_password_migrate_to = generate_digest_for_password(new_password)
-        # this will set the original password to the database, nothing changed
+        unless override_existing_password_hash_enabled?
+          self.encrypted_password_migrate_to = generate_digest_for_password(new_password)
+        end
         super
       end
 
@@ -60,14 +61,17 @@ module Devise
       def valid_password?(password)
         return false if encrypted_password.blank?
 
-        # only if feature enabled? then we do the work here
-        if encryptor_validation_enabled? && encrypted_password_migrate_to.present?
+        if valid_encryptor_hash?
           valid_password_using_encryptor?(password)
         else
           result = super
-          update_encrypted_password_migrate_to(password) if result && encrypted_password_migrate_to.nil?
+          update_encrypted_password_hash(password) if result
           result
         end
+      end
+
+      def valid_encryptor_hash?
+        encryptor_class.valid_hash?(encrypted_password)
       end
 
       # redefine serializable_hash to prevent encrypted_password_migrate_to leaking
@@ -79,12 +83,17 @@ module Devise
 
       protected
 
-      def update_encrypted_password_migrate_to(password)
+      def password_digest(password)
+        override_existing_password_hash_enabled? ? generate_digest_for_password(password) : super
+      end
+
+      def update_encrypted_password_hash(password)
         return if new_record?
 
-        update_column(:encrypted_password_migrate_to, generate_digest_for_password(password))
+        column_name = override_existing_password_hash_enabled? ? :encrypted_password : :encrypted_password_migrate_to
+        update_column(column_name, generate_digest_for_password(password))
       rescue StandardError => e # capture StandardError instead of ActiveRecordError to play safe
-        log_error('Failed to update_column encrypted_password_migrate_to', e)
+        log_error("Failed to update_column #{column_name}", e)
       end
 
       def generate_digest_for_password(password)
@@ -94,13 +103,13 @@ module Devise
                                self.class.pepper)
       end
 
-      def encryptor_validation_enabled?
-        self.class.enable_validation&.call(self)
+      def override_existing_password_hash_enabled?
+        self.class.override_existing_password_hash&.call(self)
       end
 
       def valid_password_using_encryptor?(password)
         encryptor_arguments = [
-          encrypted_password_migrate_to,
+          encrypted_password,
           password,
           self.class.stretches,
           self.class.password_salt,
@@ -119,7 +128,7 @@ module Devise
 
       # class method get injected into Devise module
       module ClassMethods
-        Devise::Models.config(self, :encryptor, :enable_validation)
+        Devise::Models.config(self, :encryptor, :override_existing_password_hash)
 
         # Returns the class for the configured encryptor.
         def encryptor_class
@@ -135,9 +144,9 @@ module Devise
         def compute_encryptor_class(encryptor)
           case encryptor
           when :bcrypt
-            raise 'In order to use bcrypt as encryptor, simply remove :encryptable from your devise model'
+            raise 'In order to use bcrypt as encryptor, simply remove :migratable from your devise model'
           when nil
-            raise 'You need to give an :encryptor as option in order to use :encryptable'
+            raise 'You need to give an :encryptor as option in order to use :migratable'
           else
             Devise::Migratable::Encryptors.const_get(encryptor.to_s.classify)
           end

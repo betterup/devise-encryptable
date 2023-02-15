@@ -1,4 +1,5 @@
 ENV["RAILS_ENV"] = "test"
+require 'simplecov'
 require "devise"
 require "devise/version"
 require "active_support/core_ext/module/attribute_accessors"
@@ -12,6 +13,8 @@ require "mocha/setup"
 require 'support/assertions'
 require 'support/factories'
 require 'support/swappers'
+
+SimpleCov.start
 
 if ActiveSupport.respond_to?(:test_order)
   ActiveSupport.test_order = :random
