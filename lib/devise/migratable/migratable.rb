@@ -3,20 +3,20 @@ module Devise
   mattr_accessor :encryptor
   @@encryptor = nil
 
-  # block to be evaluated to determine wether to validate using encryptor
-  mattr_accessor :enable_validation
-  @@enable_validation = nil
+  mattr_accessor :override_existing_password_hash
+  @@override_existing_password_hash = nil
 
-  # Sets enable_validation block
+
+  # Sets override_existing_password_hash block
   #
   #  Devise.setup do |config|
   #
-  #    config.validate_using_encryptor do |user|
-  #      Features.active?(:enable_pbkdf2_validation, user)
+  #    config.override_existing_password_hash_check do |user|
+  #      Features.active?(:override_existing_password_hash_using_encryptor, user)
   #    end
   #  end
-  def self.validate_using_encryptor(&block)
-    @@enable_validation = block
+  def self.override_existing_password_hash_check(&block)
+    @@override_existing_password_hash = block
   end
 
   module Migratable

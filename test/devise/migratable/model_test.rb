@@ -1,11 +1,12 @@
 require 'test_helper'
 require 'active_model'
+require 'bcrypt'
 
 class MigratableTest < ActiveSupport::TestCase
   include Support::Assertions
   include Support::Factories
 
-  def unconfig_user_model
+  def unconfig_user_model(mock_salt: true)
     Class.new do
       include ActiveModel::Serialization
       include ActiveModel::Model
@@ -26,13 +27,12 @@ class MigratableTest < ActiveSupport::TestCase
       end
 
       # skip active record layer
-      def update_column(_name, value)
-        self.encrypted_password_migrate_to = value
+      def update_column(name, value)
+        send("#{name}=", value)
       end
 
-      # prevent moving salt everytime
-      def self.password_salt
-        'here we go'
+      define_singleton_method(:password_salt) do
+        mock_salt ? 'here we go' : super()
       end
 
       def new_record?
@@ -51,11 +51,18 @@ class MigratableTest < ActiveSupport::TestCase
     end
   end
 
+  def configed_user_model_with_encryptor(encryptor: nil)
+    Class.new(unconfig_user_model) do
+      devise :database_authenticatable, :migratable, encryptor: encryptor
+    end
+  end
+
   def random_password_salt_user_model
-    Class.new(configed_user_model) do
-      def self.password_salt
-        Devise.friendly_token[0, 20]
-      end
+    Class.new(unconfig_user_model(mock_salt: false)) do
+      devise :database_authenticatable, 
+        :migratable, 
+        encryptor: :pbkdf2_sha512,
+        override_existing_password_hash: proc { |_user| true }
     end
   end
 
@@ -83,12 +90,12 @@ class MigratableTest < ActiveSupport::TestCase
     end
   end
 
-  def configed_user_model_with_feature(enabled: true)
+  def configed_user_model_with_enable_overrides(enabled: true, feature_class: nil)
     Class.new(unconfig_user_model) do
       devise :database_authenticatable,
              :migratable,
              encryptor: :pbkdf2_sha512,
-             enable_validation: proc { |_user| enabled }
+             override_existing_password_hash: proc { |_user| feature_class ? feature_class.try(:active?) : enabled }
     end
   end
 
@@ -99,6 +106,14 @@ class MigratableTest < ActiveSupport::TestCase
         raise ActiveRecord::ActiveRecordError, 'Can not update attribute somehow'
       end
     end
+  end
+
+  def valid_pbkdf2_hash?(pass)
+    Devise::Migratable::Encryptors::Pbkdf2Sha512.valid_hash?(pass)
+  end
+
+  def valid_bcrypt_hash?(pass)
+    ::BCrypt::Password.valid_hash?(pass)
   end
 
   test 'should generate salt while setting password' do
@@ -116,14 +131,6 @@ class MigratableTest < ActiveSupport::TestCase
     assert another_user.valid_password?('password')
   end
 
-  test 'should validate against the new password column' do
-    user = configed_user_model_with_feature(enabled: true).new
-    user.password = 'password'
-    # mess around with old one so we ensure it's checking against the new one
-    user.encrypted_password = 'thisonly changes old one'
-    assert user.valid_password?('password')
-  end
-
   test 'should save new encrypted pass if not exists at the beginning' do
     user = configed_user_model.new
     user.password = 'password'
@@ -134,42 +141,12 @@ class MigratableTest < ActiveSupport::TestCase
     refute user.encrypted_password_migrate_to.nil?
   end
 
-  test "should not save new encrypted password if it's already exists" do
-    user = random_password_salt_user_model.new
-    user.password = 'password'
-    # check
-    user.encrypted_password_migrate_to = nil
-    assert user.valid_password?('password')
-    # now it's set the new one
-    new_encrypted_pass = user.encrypted_password_migrate_to
-    # check validation again
-    assert user.valid_password?('password')
-    # new encrypted pass should not be updated if it's exists
-    assert_equal new_encrypted_pass, user.encrypted_password_migrate_to
-  end
-
   test 'should not serialize the new encrypted password col' do
-    user = configed_user_model_with_feature(enabled: true).new
+    user = configed_user_model_with_enable_overrides(enabled: true).new
     user.password = 'password'
     # convert it to json
     inspect_str = user.inspect
     refute inspect_str.include?('encrypted_password_migrate_to')
-  end
-
-  test 'should not validate new encrypted password if feature flag is off' do
-    user = configed_user_model_with_feature(enabled: false).new
-    user.password = 'password'
-    # manually set the encrypted_password_migrate_to to a wrong one
-    user.encrypted_password_migrate_to = 'notrightone'
-    assert user.valid_password?('password')
-  end
-
-  test 'should fallback to validating encrypted_password if encrypted_password_migrate_to not present even with feature enabled' do
-    user = configed_user_model_with_feature(enabled: true).new
-    user.password = 'password'
-    # manually set the encrypted_password_migrate_to to empty
-    user.encrypted_password_migrate_to = nil
-    assert user.valid_password?('password')
   end
 
   test 'migratable should respect parent model except list' do
@@ -195,5 +172,58 @@ class MigratableTest < ActiveSupport::TestCase
     user.valid_password?('password')
     # do not issue update_column call for new_record
     assert user.encrypted_password_migrate_to.nil?
+  end
+
+  test 'migratable should override existing encrypted_password column if feature enabled' do
+    user = configed_user_model_with_enable_overrides(enabled: true).new
+    user.password = 'password'
+    assert user.encrypted_password_migrate_to.nil?
+    assert user.valid_password?('password')
+    assert valid_pbkdf2_hash?(user.encrypted_password)
+  end
+
+  test 'migratable should override existing encrypted_password column when doing validation' do
+    feature_class = Class.new do
+      define_singleton_method(:active?) do
+        false
+      end
+    end
+    user_model = configed_user_model_with_enable_overrides(feature_class: feature_class)
+    user = user_model.new
+    user.password = 'password'
+    refute user.encrypted_password_migrate_to.nil?
+    assert valid_bcrypt_hash?(user.encrypted_password)
+    # enable feature
+    feature_class.define_singleton_method(:active?) do
+      true
+    end
+    assert user.valid_password?('password')
+    assert valid_pbkdf2_hash?(user.encrypted_password)
+  end
+
+  test 'migratable module would require encrypted_password_migrate_to' do
+    required_fields = Devise::Models::Migratable.required_fields(configed_user_model)
+    assert required_fields.include?(:encrypted_password_migrate_to)
+  end
+
+  test 'migratable should raise if given bcrypt as encryptor' do
+    user = configed_user_model_with_encryptor(encryptor: :bcrypt).new
+    assert_raise { user.password = 'password' }
+  end
+
+  test 'migratable should raise if not given encryptor arg' do
+    user = configed_user_model_with_encryptor(encryptor: nil).new
+    assert_raise { user.password = 'password' }
+  end
+
+  test 'random salt will be used for hashing password' do
+    user = random_password_salt_user_model.new
+    user.password = 'password'
+    encrypted_password_first = user.encrypted_password
+    user.password = 'password'
+    encrypted_password_second = user.encrypted_password
+    assert valid_pbkdf2_hash?(encrypted_password_first)
+    assert valid_pbkdf2_hash?(encrypted_password_second)
+    assert encrypted_password_first != encrypted_password_second
   end
 end
